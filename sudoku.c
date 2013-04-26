@@ -16,6 +16,7 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,15 +40,15 @@ typedef struct {
     int row_count;
 } DLXColumnData;
 
-static const int kMaxPuzzleSize = 1024;
+static const int kMaxPuzzleSize = 256;
 static bool gPrintNumOnly = false;
 static DLXObject* gHeader;
 static Puzzle* gSolution;
-static size_t gNumSolutions;
+static uint64_t gNumSolutions;
 
 static void fatal(const char* msg, ...) {
     va_list ap;
-    fprintf(stderr, "fatal: ");
+    fprintf(stderr, "error: ");
     va_start(ap, msg);
     vfprintf(stderr, msg, ap);
     va_end(ap);
@@ -60,11 +61,6 @@ static void* xmalloc(size_t n) {
     if (!p)
         fatal("out of memory");
     return p;
-}
-
-static inline bool issquare(int x) {
-    int s = sqrt(x);
-    return s * s == x;
 }
 
 static void print_puzzle(Puzzle* p) {
@@ -89,10 +85,15 @@ static void free_puzzle(Puzzle* puzzle) {
     free(puzzle->cells);
 }
 
+static inline bool issquare(int x) {
+    int s = sqrt(x);
+    return s * s == x;
+}
+
 static int read_puzzle(Puzzle* puzzle, FILE* in) {
     puzzle->cells = NULL;
     puzzle->size = 0;
-    size_t cell = 0, num_cells = 0;
+    int cell = 0, num_cells = 0;
     while (!feof(in)) {
         // Read in one field at a time, ignoring all whitespace.
         // A field can never be longer than the maximum length of the
@@ -109,7 +110,7 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
                 goto err;
 
             puzzle->cells = xmalloc(sizeof(int*) * size);
-            num_cells = (size_t) size * size;
+            num_cells = size * size;
             // Allocate all cells at once, then slice up the allocation.
             puzzle->cells[0] = xmalloc(sizeof(int) * num_cells);
             for (int i = 1; i < size; i++)
@@ -206,11 +207,11 @@ static void dlx_solve(void) {
 
 static void solve_puzzle(Puzzle* p) {
     // Manufacture a DLX structure for solving p, then call dlx_solve().
-
     int puzzle_size = p->size;
-    size_t num_cells = (size_t) puzzle_size * puzzle_size;
-    size_t num_constraints = 4 * num_cells;
-    size_t num_choices = num_cells * puzzle_size;
+    int num_cells = puzzle_size * puzzle_size;
+    int num_constraints = 4 * num_cells;
+    int num_choices = num_cells * puzzle_size;
+
     // Allocate all DLXObjects at once, then link them together below.
     gHeader = xmalloc(sizeof(DLXObject) *
             (num_choices * 4 + num_constraints + 1));
@@ -222,7 +223,7 @@ static void solve_puzzle(Puzzle* p) {
     DLXColumnData* col_data = xmalloc(sizeof(DLXColumnData) * num_constraints);
     // Keep a list of the bottom-most object in each column.
     DLXObject** object_cols = xmalloc(sizeof(DLXObject*) * num_constraints);
-    for (size_t i = 0; i < num_constraints; i++) {
+    for (int i = 0; i < num_constraints; i++) {
         DLXObject* c = gHeader + 1 + i;
         c->left = c - 1;
         c->right = c + 1;
@@ -251,14 +252,14 @@ static void solve_puzzle(Puzzle* p) {
                 // Calculate the index (i.e. distance from gHeader) of the four
                 // constraint columns corresponding to this (row, col, value)
                 // triple.
-                size_t constraint_indices[4] = {
-                    (size_t) puzzle_size * r + c,               // row-column
-                    (size_t) puzzle_size * r + v - 1,           // row-value
-                    (size_t) puzzle_size * c + v - 1,           // column-value
-                    (size_t) puzzle_size * block_index + v - 1  // block-value
+                int constraint_indices[4] = {
+                    puzzle_size * r + c,               // row-column
+                    puzzle_size * r + v - 1,           // row-value
+                    puzzle_size * c + v - 1,           // column-value
+                    puzzle_size * block_index + v - 1  // block-value
                 };
                 for (int i = 0; i < 4; i++) {
-                    size_t idx = i * num_cells + constraint_indices[i];
+                    int idx = i * num_cells + constraint_indices[i];
                     DLXObject* obj_above = object_cols[idx];
                     obj->up = obj_above;
                     obj->left = obj - 1;
@@ -274,7 +275,7 @@ static void solve_puzzle(Puzzle* p) {
             }
         }
     }
-    for (size_t i = 0; i < num_constraints; i++) {
+    for (int i = 0; i < num_constraints; i++) {
         DLXObject* o = object_cols[i];
         o->down = o->column;
         o->column->up = o;
@@ -287,7 +288,7 @@ static void solve_puzzle(Puzzle* p) {
             int v = p->cells[r][c];
             if (v != 0) {
                 DLXObject* dlx_row = last_constraint + 1 +
-                        4 * (num_cells * r + (size_t) puzzle_size * c + v - 1);
+                        4 * (num_cells * r + puzzle_size * c + v - 1);
 
                 cover_column(dlx_row->column);
                 for (DLXObject* o = dlx_row->right; o != dlx_row; o = o->right)
