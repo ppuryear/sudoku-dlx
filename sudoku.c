@@ -40,11 +40,21 @@ typedef struct {
     int row_count;
 } DLXColumnData;
 
+typedef struct {
+    bool print_solutions;
+    bool print_num_solutions;
+    bool print_attempts;
+} ProgramConfig;
+
+typedef struct {
+    DLXObject* header;
+    Puzzle* solution;
+    uint64_t num_solutions;
+} DLXParameters;
+
 static const int kMaxPuzzleSize = 256;
-static bool gPrintNumOnly = false;
-static DLXObject* gHeader;
-static Puzzle* gSolution;
-static uint64_t gNumSolutions;
+static ProgramConfig config;
+static DLXParameters dlx_params;
 
 static void fatal(const char* msg, ...) {
     va_list ap;
@@ -168,21 +178,22 @@ static void uncover_column(DLXObject* c) {
     c->left->right = c;
 }
 
-static void dlx_solve(void) {
-    if (gHeader->right == gHeader) {
+static void dlx_solve(int k) {
+    DLXObject* h = dlx_params.header;
+    Puzzle* p = dlx_params.solution;
+    if (h->right == h) {
         // Found a solution.
-        if (!gPrintNumOnly) {
-            if (gNumSolutions > 0)
-                printf("\n");
-            print_puzzle(gSolution);
+        if (config.print_solutions) {
+            print_puzzle(p);
+            printf("\n");
         }
-        gNumSolutions++;
+        dlx_params.num_solutions++;
         return;
     }
 
     DLXObject* c;
-    int min_row_count = gSolution->size + 1;
-    for (DLXObject* j = gHeader->right; j != gHeader; j = j->right) {
+    int min_row_count = p->size + 1;
+    for (DLXObject* j = h->right; j != h; j = j->right) {
         int row_count = get_column_data(j)->row_count;
         if (row_count < min_row_count) {
             c = j;
@@ -192,12 +203,15 @@ static void dlx_solve(void) {
     cover_column(c);
     for (DLXObject* r = c->down; r != c; r = r->down) {
         // Record this value in the solution puzzle.
-        DLXRowData* row_data = r->data;
-        gSolution->cells[row_data->row][row_data->column] = row_data->value;
+        DLXRowData row_data = *(DLXRowData*) r->data;
+        if (config.print_attempts)
+            printf("[%d] Trying %d at (%d,%d).\n",
+                    k, row_data.value, row_data.row, row_data.column);
+        p->cells[row_data.row][row_data.column] = row_data.value;
 
         for (DLXObject* j = r->right; j != r; j = j->right)
             cover_column(j->column);
-        dlx_solve();
+        dlx_solve(k + 1);
 
         for (DLXObject* j = r->left; j != r; j = j->left)
             uncover_column(j->column);
@@ -213,18 +227,18 @@ static void solve_puzzle(Puzzle* p) {
     int num_choices = num_cells * puzzle_size;
 
     // Allocate all DLXObjects at once, then link them together below.
-    gHeader = xmalloc(sizeof(DLXObject) *
+    DLXObject* header = xmalloc(sizeof(DLXObject) *
             (num_choices * 4 + num_constraints + 1));
 
     // Link up the column headers (which correspond to constraints).
-    DLXObject* last_constraint = gHeader + num_constraints;
-    gHeader->left = last_constraint;
-    gHeader->right = gHeader + 1;
+    DLXObject* last_constraint = header + num_constraints;
+    header->left = last_constraint;
+    header->right = header + 1;
     DLXColumnData* col_data = xmalloc(sizeof(DLXColumnData) * num_constraints);
     // Keep a list of the bottom-most object in each column.
     DLXObject** object_cols = xmalloc(sizeof(DLXObject*) * num_constraints);
     for (int i = 0; i < num_constraints; i++) {
-        DLXObject* c = gHeader + 1 + i;
+        DLXObject* c = header + 1 + i;
         c->left = c - 1;
         c->right = c + 1;
         c->column = c;
@@ -232,7 +246,7 @@ static void solve_puzzle(Puzzle* p) {
         col_data[i].row_count = puzzle_size;
         object_cols[i] = c;
     }
-    last_constraint->right = gHeader;
+    last_constraint->right = header;
 
     // Link up the row objects.
     DLXObject* obj = last_constraint + 1;
@@ -249,7 +263,7 @@ static void solve_puzzle(Puzzle* p) {
                 data->value = v;
 
                 DLXObject* start = obj;
-                // Calculate the index (i.e. distance from gHeader) of the four
+                // Calculate the index (i.e. distance from header) of the four
                 // constraint columns corresponding to this (row, col, value)
                 // triple.
                 int constraint_indices[4] = {
@@ -264,7 +278,7 @@ static void solve_puzzle(Puzzle* p) {
                     obj->up = obj_above;
                     obj->left = obj - 1;
                     obj->right = obj + 1;
-                    obj->column = gHeader + 1 + idx;
+                    obj->column = header + 1 + idx;
                     obj->data = data;
                     obj_above->down = obj;
                     object_cols[idx] = obj;
@@ -297,17 +311,20 @@ static void solve_puzzle(Puzzle* p) {
         }
     }
 
-    gSolution = p;
-    gNumSolutions = 0;
-    dlx_solve();
+    dlx_params = (DLXParameters) {
+        .header = header,
+        .solution = p,
+        .num_solutions = 0
+    };
+    dlx_solve(0);
 
-    if (gPrintNumOnly)
-        printf("%zu\n", gNumSolutions);
-    else if (gNumSolutions == 0)
+    if (config.print_num_solutions)
+        printf("%zu\n", dlx_params.num_solutions);
+    else if (dlx_params.num_solutions == 0)
         printf("Puzzle has no solutions.\n");
     free(row_data_start);
     free(col_data);
-    free(gHeader);
+    free(header);
 }
 
 static void print_usage(void) {
@@ -316,23 +333,34 @@ static void print_usage(void) {
 "\n"
 "Options:\n"
 "  -n    print only the number of solutions found\n"
+"  -v    print every attemped cell value\n"
 "  -h    show this message and exit\n");
 }
 
 int main(int argc, char** argv) {
+    config = (ProgramConfig) {
+        .print_solutions = true,
+        .print_num_solutions = false,
+        .print_attempts = false
+    };
     static const struct option long_options[] = {
         { "number-only", no_argument, NULL, 'n' },
+        { "verbose", no_argument, NULL, 'v' },
         { "help", no_argument, NULL, 'h' },
         { NULL, 0, NULL, 0 }
     };
     for (;;) {
-        int c = getopt_long(argc, argv, "nh", long_options, NULL);
+        int c = getopt_long(argc, argv, "nvh", long_options, NULL);
         if (c == -1)
             break;
 
         switch (c) {
         case 'n':
-            gPrintNumOnly = true;
+            config.print_num_solutions = true;
+            config.print_solutions = false;
+            break;
+        case 'v':
+            config.print_attempts = true;
             break;
         case 'h':
             print_usage();
