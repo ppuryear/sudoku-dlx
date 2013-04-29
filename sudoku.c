@@ -54,7 +54,11 @@ typedef struct {
 } DLXParameters;
 
 static const int kMaxPuzzleSize = 256;
-static ProgramConfig config;
+static ProgramConfig config = {
+    .print_solutions = true,
+    .print_num_solutions = false,
+    .print_attempts = false
+};
 static DLXParameters dlx_params;
 
 static void fatal(const char* msg, ...) {
@@ -91,6 +95,20 @@ static void print_puzzle(Puzzle* p) {
     }
 }
 
+static void init_puzzle(Puzzle* p, int size) {
+    p->cells = xmalloc(sizeof(int*) * size);
+    p->cells[0] = xmalloc(sizeof(int) * size * size);
+    for (int i = 1; i < size; i++)
+        p->cells[i] = p->cells[i - 1] + size;
+    p->size = size;
+}
+
+static void copy_puzzle(Puzzle* a, Puzzle* b) {
+    int size = b->size;
+    init_puzzle(a, size);
+    memcpy(a->cells[0], b->cells[0], sizeof(int) * size * size);
+}
+
 static void free_puzzle(Puzzle* puzzle) {
     free(puzzle->cells[0]);
     free(puzzle->cells);
@@ -102,8 +120,8 @@ static inline bool issquare(int x) {
 }
 
 static int read_puzzle(Puzzle* puzzle, FILE* in) {
+    bool read_size = false;
     puzzle->cells = NULL;
-    puzzle->size = 0;
     int cell = 0, num_cells = 0;
     while (!feof(in)) {
         // Read in one field at a time, ignoring all whitespace.
@@ -113,20 +131,16 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
         // The trailing space is necessary to consume all trailing whitepace.
         if (fscanf(in, "%15s ", buf) != 1)
             goto err;
-        if (puzzle->size == 0) {
+        if (!read_size) {
             // Interpret the first field as the puzzle size.
             int size;
             if (sscanf(buf, "%d", &size) != 1 || size < 1 ||
                 size > kMaxPuzzleSize || !issquare(size))
                 goto err;
 
-            puzzle->cells = xmalloc(sizeof(int*) * size);
             num_cells = size * size;
-            // Allocate all cells at once, then slice up the allocation.
-            puzzle->cells[0] = xmalloc(sizeof(int) * num_cells);
-            for (int i = 1; i < size; i++)
-                puzzle->cells[i] = puzzle->cells[i - 1] + size;
-            puzzle->size = size;
+            init_puzzle(puzzle, size);
+            read_size = true;
             continue;
         }
 
@@ -143,7 +157,7 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
         puzzle->cells[0][cell] = value;
         cell++;
     }
-    if (puzzle->size > 0 && cell == num_cells)
+    if (read_size && cell == num_cells)
         return 0;
 err:
     if (puzzle->cells)
@@ -312,9 +326,11 @@ static void solve_puzzle(Puzzle* p) {
         }
     }
 
+    Puzzle solution;
+    copy_puzzle(&solution, p);
     dlx_params = (DLXParameters) {
         .header = header,
-        .solution = p,
+        .solution = &solution,
         .num_solutions = 0
     };
     dlx_solve(0);
@@ -323,6 +339,8 @@ static void solve_puzzle(Puzzle* p) {
         printf("%" PRIu64 "\n", dlx_params.num_solutions);
     else if (dlx_params.num_solutions == 0)
         printf("Puzzle has no solutions.\n");
+
+    free_puzzle(&solution);
     free(row_data_start);
     free(col_data);
     free(header);
@@ -339,11 +357,6 @@ static void print_usage(void) {
 }
 
 int main(int argc, char** argv) {
-    config = (ProgramConfig) {
-        .print_solutions = true,
-        .print_num_solutions = false,
-        .print_attempts = false
-    };
     static const struct option long_options[] = {
         { "number-only", no_argument, NULL, 'n' },
         { "verbose", no_argument, NULL, 'v' },
