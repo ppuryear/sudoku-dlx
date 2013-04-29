@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 2.6)
 project(sudoku-dlx C)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -Wall")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -Wall -Wextra")
 # By default, CMake passes -rdynamic to the linker on Linux. This silently
 # breaks LTO when linking with a static library, so remove the flag.
 set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "")

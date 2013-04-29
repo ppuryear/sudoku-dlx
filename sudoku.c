@@ -191,7 +191,7 @@ static void dlx_solve(int k) {
         return;
     }
 
-    DLXObject* c;
+    DLXObject* c = h;
     int min_row_count = p->size + 1;
     for (DLXObject* j = h->right; j != h; j = j->right) {
         int row_count = get_column_data(j)->row_count;
