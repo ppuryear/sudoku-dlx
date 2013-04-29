@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -319,7 +320,7 @@ static void solve_puzzle(Puzzle* p) {
     dlx_solve(0);
 
     if (config.print_num_solutions)
-        printf("%zu\n", dlx_params.num_solutions);
+        printf("%" PRIu64 "\n", dlx_params.num_solutions);
     else if (dlx_params.num_solutions == 0)
         printf("Puzzle has no solutions.\n");
     free(row_data_start);
