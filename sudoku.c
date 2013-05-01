@@ -25,7 +25,7 @@
 
 typedef struct {
     int** cells;
-    int size;
+    int size, num_cells;
 } Puzzle;
 
 typedef struct DLXObject {
@@ -97,16 +97,17 @@ static void print_puzzle(Puzzle* p) {
 
 static void init_puzzle(Puzzle* p, int size) {
     p->cells = xmalloc(sizeof(int*) * size);
-    p->cells[0] = xmalloc(sizeof(int) * size * size);
+    int num_cells = size * size;
+    p->cells[0] = xmalloc(sizeof(int) * num_cells);
     for (int i = 1; i < size; i++)
         p->cells[i] = p->cells[i - 1] + size;
     p->size = size;
+    p->num_cells = num_cells;
 }
 
 static void copy_puzzle(Puzzle* a, Puzzle* b) {
-    int size = b->size;
-    init_puzzle(a, size);
-    memcpy(a->cells[0], b->cells[0], sizeof(int) * size * size);
+    init_puzzle(a, b->size);
+    memcpy(a->cells[0], b->cells[0], sizeof(int) * b->num_cells);
 }
 
 static void free_puzzle(Puzzle* puzzle) {
@@ -122,7 +123,7 @@ static inline bool issquare(int x) {
 static int read_puzzle(Puzzle* puzzle, FILE* in) {
     bool read_size = false;
     puzzle->cells = NULL;
-    int cell = 0, num_cells = 0;
+    int cell = 0;
     while (!feof(in)) {
         // Read in one field at a time, ignoring all whitespace.
         // A field can never be longer than the maximum length of the
@@ -138,13 +139,12 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
                 size > kMaxPuzzleSize || !issquare(size))
                 goto err;
 
-            num_cells = size * size;
             init_puzzle(puzzle, size);
             read_size = true;
             continue;
         }
 
-        if (cell >= num_cells)
+        if (cell >= puzzle->num_cells)
             goto err;
         int value;
         if (strcmp(buf, ".") == 0)
@@ -157,7 +157,7 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
         puzzle->cells[0][cell] = value;
         cell++;
     }
-    if (read_size && cell == num_cells)
+    if (read_size && cell == puzzle->num_cells)
         return 0;
 err:
     if (puzzle->cells)
@@ -237,7 +237,7 @@ static void dlx_solve(int k) {
 static void solve_puzzle(Puzzle* p) {
     // Manufacture a DLX structure for solving p, then call dlx_solve().
     int puzzle_size = p->size;
-    int num_cells = puzzle_size * puzzle_size;
+    int num_cells = p->num_cells;
     int num_constraints = 4 * num_cells;
     int num_choices = num_cells * puzzle_size;
 
