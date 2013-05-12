@@ -44,12 +44,11 @@ typedef struct {
 typedef struct {
     bool print_solutions;
     bool print_num_solutions;
-    bool print_attempts;
 } ProgramConfig;
 
 typedef struct {
     DLXObject* header;
-    Puzzle* solution;
+    Puzzle solution;
     uint64_t num_solutions;
 } DLXParameters;
 
@@ -57,7 +56,6 @@ static const int kMaxPuzzleSize = 256;
 static ProgramConfig config = {
     .print_solutions = true,
     .print_num_solutions = false,
-    .print_attempts = false
 };
 static DLXParameters dlx_params;
 
@@ -83,13 +81,14 @@ static void print_puzzle(Puzzle* p) {
     int max_width = 1 + (int) log10(size);
     for (int i = 0; i < size; i++) {
         for (int j = 0; j < size; j++) {
+            if (j > 0)
+                printf(" ");
+
             int value = p->cells[i][j];
             if (value == 0)
                 printf(".");
             else
                 printf("%*d", max_width, value);
-            if (j != size - 1)
-                printf(" ");
         }
         printf("\n");
     }
@@ -149,11 +148,9 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
         int value;
         if (strcmp(buf, ".") == 0)
             value = 0;
-        else {
-            if (sscanf(buf, "%d", &value) != 1 || value < 1 ||
-                value > puzzle->size)
-                goto err;
-        }
+        else if (sscanf(buf, "%d", &value) != 1 ||
+                 value < 1 || value > puzzle->size)
+            goto err;
         puzzle->cells[0][cell] = value;
         cell++;
     }
@@ -193,21 +190,21 @@ static void uncover_column(DLXObject* c) {
     c->left->right = c;
 }
 
-static void dlx_solve(int k) {
+static void dlx_solve(void) {
     DLXObject* h = dlx_params.header;
-    Puzzle* p = dlx_params.solution;
     if (h->right == h) {
         // Found a solution.
         if (config.print_solutions) {
-            print_puzzle(p);
-            printf("\n");
+            if (dlx_params.num_solutions > 0)
+                printf("\n");
+            print_puzzle(&dlx_params.solution);
         }
         dlx_params.num_solutions++;
         return;
     }
 
     DLXObject* c = h;
-    int min_row_count = p->size + 1;
+    int min_row_count = dlx_params.solution.size + 1;
     for (DLXObject* j = h->right; j != h; j = j->right) {
         int row_count = get_column_data(j)->row_count;
         if (row_count < min_row_count) {
@@ -219,14 +216,12 @@ static void dlx_solve(int k) {
     for (DLXObject* r = c->down; r != c; r = r->down) {
         // Record this value in the solution puzzle.
         DLXRowData row_data = *(DLXRowData*) r->data;
-        if (config.print_attempts)
-            printf("[%d] Trying %d at (%d,%d).\n",
-                    k, row_data.value, row_data.row, row_data.column);
-        p->cells[row_data.row][row_data.column] = row_data.value;
+        dlx_params.solution.cells[row_data.row][row_data.column] =
+            row_data.value;
 
         for (DLXObject* j = r->right; j != r; j = j->right)
             cover_column(j->column);
-        dlx_solve(k + 1);
+        dlx_solve();
 
         for (DLXObject* j = r->left; j != r; j = j->left)
             uncover_column(j->column);
@@ -326,21 +321,17 @@ static void solve_puzzle(Puzzle* p) {
         }
     }
 
-    Puzzle solution;
-    copy_puzzle(&solution, p);
-    dlx_params = (DLXParameters) {
-        .header = header,
-        .solution = &solution,
-        .num_solutions = 0
-    };
-    dlx_solve(0);
+    dlx_params.header = header;
+    copy_puzzle(&dlx_params.solution, p);
+    dlx_params.num_solutions = 0;
+    dlx_solve();
 
     if (config.print_num_solutions)
         printf("%" PRIu64 "\n", dlx_params.num_solutions);
     else if (dlx_params.num_solutions == 0)
         printf("Puzzle has no solutions.\n");
 
-    free_puzzle(&solution);
+    free_puzzle(&dlx_params.solution);
     free(row_data_start);
     free(col_data);
     free(header);
@@ -352,19 +343,17 @@ static void print_usage(void) {
 "\n"
 "Options:\n"
 "  -n    print only the number of solutions found\n"
-"  -v    print every attemped cell value\n"
 "  -h    show this message and exit\n");
 }
 
 int main(int argc, char** argv) {
     static const struct option long_options[] = {
         { "number-only", no_argument, NULL, 'n' },
-        { "verbose", no_argument, NULL, 'v' },
         { "help", no_argument, NULL, 'h' },
         { NULL, 0, NULL, 0 }
     };
     for (;;) {
-        int c = getopt_long(argc, argv, "nvh", long_options, NULL);
+        int c = getopt_long(argc, argv, "nh", long_options, NULL);
         if (c == -1)
             break;
 
@@ -372,9 +361,6 @@ int main(int argc, char** argv) {
         case 'n':
             config.print_num_solutions = true;
             config.print_solutions = false;
-            break;
-        case 'v':
-            config.print_attempts = true;
             break;
         case 'h':
             print_usage();
@@ -393,14 +379,14 @@ int main(int argc, char** argv) {
     Puzzle p;
     FILE* f = fopen(argv[0], "r");
     if (!f)
-        fatal("could not open %s: %s", argv[0], strerror(errno));
+        fatal("cannot open %s: %s", argv[0], strerror(errno));
     if (read_puzzle(&p, f) < 0) {
-        if (ferror(f))
-            fatal("error reading %s: %s", argv[0], strerror(errno));
-        else
-            fatal("incorrect file format");
+        const char* error_str = ferror(f) ? strerror(errno) :
+            "incorrect puzzle format";
+        fatal("error reading %s: %s", argv[0], error_str);
     }
     solve_puzzle(&p);
     free_puzzle(&p);
+    fclose(f);
     return 0;
 }
