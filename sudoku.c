@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <getopt.h>
 
 typedef struct {
@@ -48,14 +49,15 @@ typedef struct {
 
 typedef struct {
     DLXObject* header;
-    Puzzle solution;
+    Puzzle* init;
+    Puzzle* solution;
     uint64_t num_solutions;
 } DLXParameters;
 
 static const int kMaxPuzzleSize = 256;
 static ProgramConfig config = {
     .print_solutions = true,
-    .print_num_solutions = false,
+    .print_num_solutions = false
 };
 static DLXParameters dlx_params;
 
@@ -76,19 +78,28 @@ static void* xmalloc(size_t n) {
     return p;
 }
 
-static void print_puzzle(Puzzle* p) {
-    int size = p->size;
+static void print_puzzle(Puzzle* solution, Puzzle* init) {
+    int size = solution->size;
     int max_width = 1 + (int) log10(size);
+    bool highlight_solved_cells = init && isatty(STDOUT_FILENO);
     for (int i = 0; i < size; i++) {
         for (int j = 0; j < size; j++) {
             if (j > 0)
                 printf(" ");
 
-            int value = p->cells[i][j];
+            int value = solution->cells[i][j];
             if (value == 0)
                 printf(".");
-            else
+            else {
+                bool highlight_cell =
+                    highlight_solved_cells && init->cells[i][j] == 0;
+
+                if (highlight_cell)
+                    printf("\x1b[1m");
                 printf("%*d", max_width, value);
+                if (highlight_cell)
+                    printf("\x1b[0m");
+            }
         }
         printf("\n");
     }
@@ -197,14 +208,14 @@ static void dlx_solve(void) {
         if (config.print_solutions) {
             if (dlx_params.num_solutions > 0)
                 printf("\n");
-            print_puzzle(&dlx_params.solution);
+            print_puzzle(dlx_params.solution, dlx_params.init);
         }
         dlx_params.num_solutions++;
         return;
     }
 
     DLXObject* c = h;
-    int min_row_count = dlx_params.solution.size + 1;
+    int min_row_count = dlx_params.solution->size + 1;
     for (DLXObject* j = h->right; j != h; j = j->right) {
         int row_count = get_column_data(j)->row_count;
         if (row_count < min_row_count) {
@@ -216,7 +227,7 @@ static void dlx_solve(void) {
     for (DLXObject* r = c->down; r != c; r = r->down) {
         // Record this value in the solution puzzle.
         DLXRowData row_data = *(DLXRowData*) r->data;
-        dlx_params.solution.cells[row_data.row][row_data.column] =
+        dlx_params.solution->cells[row_data.row][row_data.column] =
             row_data.value;
 
         for (DLXObject* j = r->right; j != r; j = j->right)
@@ -321,9 +332,14 @@ static void solve_puzzle(Puzzle* p) {
         }
     }
 
-    dlx_params.header = header;
-    copy_puzzle(&dlx_params.solution, p);
-    dlx_params.num_solutions = 0;
+    Puzzle solution;
+    copy_puzzle(&solution, p);
+    dlx_params = (DLXParameters) {
+        .header = header,
+        .init = p,
+        .solution = &solution,
+        .num_solutions = 0
+    };
     dlx_solve();
 
     if (config.print_num_solutions)
@@ -331,7 +347,7 @@ static void solve_puzzle(Puzzle* p) {
     else if (dlx_params.num_solutions == 0)
         printf("Puzzle has no solutions.\n");
 
-    free_puzzle(&dlx_params.solution);
+    free_puzzle(&solution);
     free(row_data_start);
     free(col_data);
     free(header);
@@ -385,6 +401,7 @@ int main(int argc, char** argv) {
             "incorrect puzzle format";
         fatal("error reading %s: %s", argv[0], error_str);
     }
+
     solve_puzzle(&p);
     free_puzzle(&p);
     fclose(f);
