@@ -80,12 +80,26 @@ static void* xmalloc(size_t n) {
 
 static void print_puzzle(Puzzle* solution, Puzzle* init) {
     int size = solution->size;
-    int max_width = 1 + (int) log10(size);
+    int block_size = sqrt(size);
+    int max_cell_width = 1 + (int) log10(size);
     bool highlight_solved_cells = init && isatty(STDOUT_FILENO);
     for (int i = 0; i < size; i++) {
+        if (i > 0 && i % block_size == 0) {
+            for (int j = 0; j < block_size; j++) {
+                if (j > 0)
+                    printf("-|-");
+                for (int k = 0; k < block_size * (1 + max_cell_width) - 1; k++)
+                    printf("-");
+            }
+            printf("\n");
+        }
+
         for (int j = 0; j < size; j++) {
-            if (j > 0)
+            if (j > 0) {
                 printf(" ");
+                if (j % block_size == 0)
+                    printf("| ");
+            }
 
             int value = solution->cells[i][j];
             if (value == 0)
@@ -95,8 +109,8 @@ static void print_puzzle(Puzzle* solution, Puzzle* init) {
                     highlight_solved_cells && init->cells[i][j] == 0;
 
                 if (highlight_cell)
-                    printf("\x1b[1m");
-                printf("%*d", max_width, value);
+                    printf("\x1b[1;31m");
+                printf("%*d", max_cell_width, value);
                 if (highlight_cell)
                     printf("\x1b[0m");
             }
@@ -154,6 +168,8 @@ static int read_puzzle(Puzzle* puzzle, FILE* in) {
             continue;
         }
 
+        if (buf[strspn(buf, "-|")] == '\0')
+            continue;
         if (cell >= puzzle->num_cells)
             goto err;
         int value;
@@ -345,7 +361,7 @@ static void solve_puzzle(Puzzle* p) {
     if (config.print_num_solutions)
         printf("%" PRIu64 "\n", dlx_params.num_solutions);
     else if (dlx_params.num_solutions == 0)
-        printf("Puzzle has no solutions.\n");
+        printf("The puzzle has no solutions.\n");
 
     free_puzzle(&solution);
     free(row_data_start);
